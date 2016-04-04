@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+apt-get update
+apt-get install -y curl python-pip python-dev
+pip install python-openstackclient
+export OS_PASSWORD=$os_password
+export OS_AUTH_URL=$os_auth_url
+export OS_USERNAME=$os_username
+export OS_TENANT_NAME=$os_tenant
+curl $image_url -o /tmp/image
+
+if [ $public == "true" ]; then
+    pub_string="--public"
+else
+    pub_string="--private"
+fi
+
+if [ $protected == "true" ]; then
+    prot_string="--protected"
+else
+    prot_string="--unprotected"
+fi
+
+openstack \
+image create \
+--container-format $container_format \
+--disk-format $disk_format \
+--min-disk $min_disk \
+--min-ram $min_ram \
+--file /tmp/image \
+$pub_string \
+$prot_string \
+$image_name

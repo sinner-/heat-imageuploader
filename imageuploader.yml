@@ -1,0 +1,179 @@
+heat_template_version: 2013-05-23
+
+description: HOT file sets up imageupload node
+
+parameters:
+  flavor:
+    type: string
+    default: m1.tiny
+    description: Flavor to use (e.g. m1.small, m1.medium, m1.large)
+  image:
+    type: string
+    default: ubuntu-14.04
+    description: Base image
+  internal_network_name:
+    type: string
+    description: The name of the internal network
+    default: internalnet
+  internal_network_cidr:
+    type: string
+    description: The CIDR of the internal network
+    default: 10.210.211.0/24
+  internal_gw_name:
+    type: string
+    description: The name of the internal network router
+    default: internalrouter
+  internal_dns_primary:
+    type: string
+    description: Primary DNS for internal network
+    default: 8.8.8.8
+  internal_dns_secondary:
+    type: string
+    description: Secondary DNS for internal network
+    default: 8.8.4.4
+  public_network_uuid:
+    type: string
+    description: The UUID of the public network
+  os_password:
+    type: string
+    description: OS_PASSWORD
+  os_auth_url:
+    type: string
+    description: OS_AUTH_URL
+  os_username:
+    type: string
+    description: OS_USERNAME
+  os_tenant:
+    type: string
+    description: OS_TENANT_NAME
+  public:
+    type: string
+    description: Whether the image should be public or private
+    default: false
+  protected:
+    type: string
+    description: Whether the image should be protected or unprotected
+    default: false
+  image_url:
+    type: string
+    description: Image URL to upload
+  image_name:
+    type: string
+    description: Image name
+  container_format:
+    type: string
+    description: Image container format
+    default: bare
+  disk_format:
+    type: string
+    description: Image disk format
+    default: qcow2
+  min_disk:
+    type: string
+    description: Minimum disk to boot image
+    default: 5
+  min_ram:
+    type: string
+    description: Minimum RAM to boot image
+    default: 512
+
+resources:
+
+   internal_net:
+    type: OS::Neutron::Net
+    properties:
+      name: { get_param: internal_network_name }
+
+   internal_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      network_id: { get_resource: internal_net }
+      cidr: { get_param: internal_network_cidr }
+      name: { get_param: internal_network_name }
+      dns_nameservers: [ { get_param: internal_dns_primary }, { get_param: internal_dns_secondary } ]
+
+   internal_router:
+    type: OS::Neutron::Router
+    properties:
+      name: { get_param: internal_gw_name }
+
+   internal_router_extgw:
+    type: OS::Neutron::RouterGateway
+    properties:
+      network_id: { get_param: public_network_uuid }
+      router_id: { get_resource: internal_router }
+
+   internal_router_interface:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: internal_router }
+      subnet_id: { get_resource: internal_subnet }
+
+   imageupload_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: imageupload
+      description: Allows all out
+      rules: [ {"direction": egress,
+                "remote_ip_prefix": 0.0.0.0/0,
+                "port_range_min": 1,
+                "port_range_max": 65535,
+                "ethertype": IPv4,
+                "protocol": tcp},
+               {"direction": egress,
+                "remote_ip_prefix": 0.0.0.0/0,
+                "port_range_min": 1,
+                "port_range_max": 65535,
+                "ethertype": IPv4,
+                "protocol": udp}]
+
+   imageupload01_internal_port:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_resource: internal_net }
+      fixed_ips:
+        - subnet_id: { get_resource: internal_subnet  }
+      security_groups:
+        - { get_resource: imageupload_secgroup }
+
+   imageupload01_floatingip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: public_network_uuid }
+
+   imageupload01_floatingip_ass:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id: { get_resource: imageupload01_floatingip }
+      port_id: { get_resource: imageupload01_internal_port }
+    depends_on:
+      - internal_router_interface
+      - internal_router_extgw
+      - imageupload01_internal_port
+
+   imageupload01:
+    type: OS::Nova::Server
+    depends_on: [ imageupload01_internal_port ]
+    properties:
+      name: imageupload01
+      image: { get_param: image}
+      flavor: { get_param: flavor }
+      networks:
+        - port: { get_resource: imageupload01_internal_port }
+      user_data_format: RAW
+      user_data:
+        str_replace:
+          template: { get_file: cloud-config.yml }
+          params:
+            $os_password: { get_param: os_password }
+            $os_auth_url: { get_param: os_auth_url }
+            $os_username: { get_param: os_username }
+            $os_tenant: { get_param: os_tenant }
+            $public: { get_param: public }
+            $protected: { get_param: protected }
+            $image_url: { get_param: image_url }
+            $image_name: { get_param: image_name }
+            $container_format: { get_param: container_format }
+            $disk_format: { get_param: disk_format }
+            $min_disk: { get_param: min_disk }
+            $min_ram: { get_param: min_ram }
